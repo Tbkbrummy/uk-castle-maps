@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>UK Castles — Interactive Map (iPhone-ready)</title>
+
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-sA+q6kYvYQq8k9W6gJRf1E9qk9kqfH6gK0v3FvC9g4o=" crossorigin=""/>
+
+<!-- MarkerCluster CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+<style>
+  :root{
+    --header-h:56px;
+    --accent:#2b7cff;
+  }
+  html,body,#map{height:100%;margin:0;padding:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial;}
+  .app {
+    display:flex;
+    flex-direction:column;
+    height:100vh;
+  }
+  header{
+    height:var(--header-h);
+    display:flex;
+    gap:8px;
+    align-items:center;
+    padding:8px;
+    box-sizing:border-box;
+    background:linear-gradient(180deg, rgba(255,255,255,0.95), rgba(250,250,250,0.9));
+    border-bottom:1px solid rgba(0,0,0,0.06);
+    position:relative;
+    z-index:1000;
+  }
+  header h1{font-size:16px;margin:0;flex:0 1 auto;}
+  header .controls{margin-left:auto;display:flex;gap:8px;align-items:center;}
+  .btn{
+    background:var(--accent);
+    color:white;
+    border-radius:8px;
+    padding:8px 10px;
+    font-size:14px;
+    border:0;
+    touch-action:manipulation;
+  }
+  .btn.ghost{
+    background:transparent;color:var(--accent);border:1px solid rgba(43,124,255,0.15);
+  }
+  .search{
+    display:flex;gap:8px;align-items:center;border-radius:8px; padding:6px 8px;
+    background:#fff;border:1px solid #eee;
+  }
+  .search input{border:0;outline:0;font-size:14px;width:160px}
+  #map{flex:1;position:relative;}
+  #side{
+    position:absolute; right:8px; top:calc(var(--header-h) + 8px); z-index:1200;
+    max-height:60vh; width:280px; background:rgba(255,255,255,0.95); border-radius:10px; overflow:auto;
+    box-shadow:0 6px 20px rgba(0,0,0,0.12); padding:10px;
+  }
+  #side h2{margin:0 0 6px 0;font-size:14px}
+  .castle-item{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f2f2f2;font-size:14px}
+  .visited-badge{background:green;color:white;padding:3px 6px;border-radius:6px;font-size:12px}
+  .export-area{display:flex;gap:6px;margin-top:8px;align-items:center}
+  /* make popups touch-friendly */
+  .leaflet-popup-content button{font-size:15px;padding:8px 12px;border-radius:8px}
+  /* responsive */
+  @media (max-width:520px){
+    #side{width:92%; left:4%; right:4%; top:calc(var(--header-h)+8px); max-height:48vh}
+    header .search input{width:100px}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>UK Castles — Interactive Map</h1>
+    <div class="controls">
+      <div class="search" role="search" aria-label="Search castles">
+        🔎 <input id="q" placeholder="Search castle or place" />
+      </div>
+      <button class="btn ghost" id="showAll">Show all</button>
+      <button class="btn" id="exportBtn">Export visited</button>
+    </div>
+  </header>
+
+  <div id="map"></div>
+
+  <div id="side" aria-live="polite">
+    <h2>Castles (sample)</h2>
+    <div id="list"></div>
+    <div class="export-area">
+      <button class="btn ghost" id="importBtn">Import visited</button>
+      <input id="fileInput" type="file" accept=".json" style="display:none"/>
+      <button class="btn" id="clearBtn">Clear visited</button>
+    </div>
+  </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+ integrity="sha256-QV8E2X+Kf8Q4v6jR1H+JwVb0lqv6w2bVJZf3yZVZkY8=" crossorigin=""></script>
+<!-- MarkerCluster -->
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+<script>
+/*
+  Simple mobile-first UK Castles map app
+  - Uses Leaflet + MarkerCluster
+  - Stores visited flags in localStorage under key: 'uk_castles_visited'
+  - Replace the `castlesGeoJSON` variable with your full GeoJSON (FeatureCollection with unique 'id' in properties)
+*/
+
+// -------------------- SAMPLE DATA --------------------
+// This is a small sample to demonstrate. Replace with a full GeoJSON file for "all" castles.
+const castlesGeoJSON = {
+  "type": "FeatureCollection",
+  "features": [
+    {"type":"Feature","properties":{"id":"warkworth","name":"Warkworth Castle","county":"Northumberland"},"geometry":{"type":"Point","coordinates":[-1.5947,55.3461]}},
+    {"type":"Feature","properties":{"id":"edinburgh","name":"Edinburgh Castle","county":"Edinburgh"},"geometry":{"type":"Point","coordinates":[-3.1999,55.9486]}},
+    {"type":"Feature","properties":{"id":"warwick","name":"Warwick Castle","county":"Warwickshire"},"geometry":{"type":"Point","coordinates":[-1.5854,52.2819]}},
+    {"type":"Feature","properties":{"id":"conwy","name":"Conwy Castle","county":"Conwy"},"geometry":{"type":"Point","coordinates":[-3.827,53.2835]}},
+    {"type":"Feature","properties":{"id":"dunnottar","name":"Dunnottar Castle","county":"Aberdeenshire"},"geometry":{"type":"Point","coordinates":[-2.1998,56.9580]}},
+    {"type":"Feature","properties":{"id":"bodiam","name":"Bodiam Castle","county":"East Sussex"},"geometry":{"type":"Point","coordinates":[0.4428,50.9773]}},
+    {"type":"Feature","properties":{"id":"dunvegan","name":"Dunvegan Castle","county":"Isle of Skye"},"geometry":{"type":"Point","coordinates":[-6.6728,57.4306]}},
+    {"type":"Feature","properties":{"id":"caernarfon","name":"Caernarfon Castle","county":"Gwynedd"},"geometry":{"type":"Point","coordinates":[-4.2794,53.1383]}},
+    {"type":"Feature","properties":{"id":"leeds_castle","name":"Leeds Castle","county":"Kent"},"geometry":{"type":"Point","coordinates":[0.4014,51.2575]}},
+    {"type":"Feature","properties":{"id":"cardiff","name":"Cardiff Castle","county":"Cardiff"},"geometry":{"type":"Point","coordinates":[-3.1808,51.4816]}}
+  ]
+};
+
+// -------------------- CONFIG --------------------
+const STORAGE_KEY = 'uk_castles_visited_v1'; // bump if schema changes
+
+// -------------------- MAP INITIALISATION --------------------
+const map = L.map('map', {tap:true, zoomControl:false}).setView([54.0, -2.5], 6);
+L.control.zoom({position:'topright'}).addTo(map);
+
+// OpenStreetMap tile (works fine on iPhone). If you want different styling, replace provider.
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+// marker cluster group
+const markers = L.markerClusterGroup();
+map.addLayer(markers);
+
+// icon
+const castleIcon = L.icon({
+  iconUrl: 'data:image/svg+xml;utf8,' + encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24">
+      <path fill="%232b7cff" d="M2 22h20v-2H2v2zm3-7V7h2v8h2V7h2v8h2V7h2v8h2V7h2v8h2V5H5v10z"/>
+    </svg>`),
+  iconSize: [36,36],
+  iconAnchor: [18,36],
+  popupAnchor: [0,-36]
+});
+
+// load visited from localStorage
+function loadVisited(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) return {};
+    return JSON.parse(raw);
+  }catch(e){console.warn('Could not parse visited data', e); return {};}
+}
+function saveVisited(obj){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+}
+
+let visited = loadVisited();
+
+// populate markers from GeoJSON
+const idToLayer = {};
+function addCastles(geojson){
+  markers.clearLayers();
+  geojson.features.forEach(f => {
+    if(!f.geometry) return;
+    const [lng,lat] = f.geometry.coordinates;
+    const id = String(f.properties.id || f.properties.ID || f.properties.name);
+    const name = f.properties.name || 'Unknown';
+    const county = f.properties.county || '';
+
+    const marker = L.marker([lat,lng], {icon:castleIcon, title:name});
+    const isVisited = !!visited[id];
+
+    // popup content with "I've been here" button
+    const visitedText = isVisited ? 'Visited ✓' : 'Mark as visited';
+    const buttonLabel = isVisited ? 'Unmark visited' : "I've been here";
+    const popupHtml = `
+      <div style="min-width:160px">
+        <strong>${escapeHtml(name)}</strong><div style="font-size:13px;color:#666">${escapeHtml(county)}</div>
+        <div style="margin-top:8px">
+          <button data-id="${escapeHtml(id)}" class="visit-btn">${buttonLabel}</button>
+          <div style="margin-top:6px;font-size:13px">${isVisited ? '<span style="color:green">Visited</span>' : '<span style="color:#888">Not visited</span>'}</div>
+        </div>
+      </div>
+    `;
+
+    marker.bindPopup(popupHtml, {minWidth:180});
+    marker.on('popupopen', (ev) => {
+      // wire up button click
+      const popupNode = ev.popup.getElement();
+      if(!popupNode) return;
+      const btn = popupNode.querySelector('.visit-btn');
+      if(!btn) return;
+      btn.addEventListener('click', () => {
+        toggleVisited(id);
+        marker.closePopup();
+      });
+    });
+
+    idToLayer[id] = {marker, feature: f};
+    markers.addLayer(marker);
+  });
+
+  // fit bounds if many or leave default view
+  try{
+    const group = L.featureGroup(Object.values(idToLayer).map(x=>x.marker));
+    if(group.getLayers().length) map.fitBounds(group.getBounds(), {padding:[40,40]});
+  }catch(e){}
+}
+
+// escape helper
+function escapeHtml(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c])); }
+
+// toggle visited state
+function toggleVisited(id){
+  visited = loadVisited(); // reload in case import changed it
+  if(visited[id]){
+    delete visited[id];
+  } else {
+    visited[id] = {ts: Date.now()};
+  }
+  saveVisited(visited);
+  refreshList();
+  refreshMarkers();
+}
+
+// refresh marker icons/popups to reflect visited state
+function refreshMarkers(){
+  Object.entries(idToLayer).forEach(([id, obj])=>{
+    const isVisited = !!visited[id];
+    // we cleverly update popup content if open; otherwise keep markers
+    // For simplicity, nothing changes visually on marker but the popup text will show visited when opened.
+  });
+}
+
+// sidebar list
+function refreshList(filter){
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  const arr = Object.entries(idToLayer).map(([id,obj])=>{
+    return {id, name: obj.feature.properties.name || id, county: obj.feature.properties.county || ''};
+  });
+  const q = (filter||'').trim().toLowerCase();
+  const filtered = arr.filter(a => !q || a.name.toLowerCase().includes(q) || (a.county||'').toLowerCase().includes(q) || a.id.toLowerCase().includes(q));
+  filtered.sort((a,b)=> (visited[b.id]?1:0) - (visited[a.id]?1:0) || a.name.localeCompare(b.name));
+
+  filtered.forEach(item=>{
+    const div = document.createElement('div');
+    div.className = 'castle-item';
+    div.innerHTML = `<div style="max-width:70%"><strong>${escapeHtml(item.name)}</strong><div style="font-size:12px;color:#666">${escapeHtml(item.county)}</div></div>
+      <div style="text-align:right">
+        ${visited[item.id] ? '<span class="visited-badge">Visited</span>' : `<button class="btn ghost small" data-id="${escapeHtml(item.id)}">I've been</button>`}
+        <div style="height:4px"></div>
+        <button class="btn" data-zoom="${escapeHtml(item.id)}">Zoom</button>
+      </div>`;
+    list.appendChild(div);
+
+    // handlers
+    const btn = div.querySelector('button[data-id]');
+    if(btn) btn.addEventListener('click', ()=>{ toggleVisited(item.id); });
+    const zoom = div.querySelector('button[data-zoom]');
+    if(zoom) zoom.addEventListener('click', ()=>{
+      const m = idToLayer[item.id].marker;
+      map.setView(m.getLatLng(), 15, {animate:true});
+      m.openPopup();
+    });
+  });
+
+  if(filtered.length===0) list.innerHTML = '<div style="color:#666;padding:6px">No castles found</div>';
+}
+
+// search handling
+document.getElementById('q').addEventListener('input', (e)=>{
+  const q = e.target.value;
+  refreshList(q);
+});
+
+// showAll button
+document.getElementById('showAll').addEventListener('click', ()=>{ map.fitBounds(L.featureGroup(Object.values(idToLayer).map(x=>x.marker)).getBounds(), {padding:[40,40]}); });
+
+// export visited
+document.getElementById('exportBtn').addEventListener('click', ()=>{
+  const dataStr = JSON.stringify(visited, null, 2);
+  const blob = new Blob([dataStr], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'visited-castles.json';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+// import visited
+document.getElementById('importBtn').addEventListener('click', ()=> document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', function(){
+  const f = this.files[0];
+  if(!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      const obj = JSON.parse(reader.result);
+      if(typeof obj === 'object' && obj !== null){
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+        visited = loadVisited();
+        refreshList();
+        alert('Imported visited data.');
+      } else alert('Invalid file format');
+    }catch(e){alert('Could not parse file: '+e.message);}
+  }
+  reader.readAsText(f);
+});
+
+// clear visited
+document.getElementById('clearBtn').addEventListener('click', ()=>{
+  if(confirm('Clear all visited flags?')){ localStorage.removeItem(STORAGE_KEY); visited={}; refreshList(); }
+});
+
+// small helper: populate map + list
+addCastles(castlesGeoJSON);
+refreshList();
+
+// optional: keyboard accessibility (Enter to search)
+document.getElementById('q').addEventListener('keydown', e=>{ if(e.key === 'Enter'){ refreshList(e.target.value); } });
+
+// initial refresh markers
+refreshMarkers();
+
+// make popups larger on mobile automatically (Leaflet handles some of this)
+</script>
+</body>
+</html>
